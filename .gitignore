@@ -1,1 +1,3 @@
-validator-social/target/*
+RBT-staking/target/*
+RBT-staking/.DS_Store
+RBT-staking/Cargo.lock

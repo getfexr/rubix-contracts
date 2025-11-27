@@ -4,19 +4,19 @@ Production-ready smart contracts for the Rubix blockchain ecosystem, featuring v
 
 ## 📁 **Contracts**
 
-### **🏛️ Validator Social (`validator-social/`)**
-A sophisticated RBT staking contract enabling users to stake tokens in support of validators and earn rewards through fungible yield tokens.
+### **🏛️ RBT Staking (`RBT-staking/`)**
+A sophisticated RBT staking contract enabling users to stake tokens and earn rewards through fungible yield tokens.
 
 **Key Features:**
 - ✅ **Real Token Integration**: Uses authentic Rubix FT APIs (`call_mint_ft_api`, `call_transfer_ft_api`)
-- ✅ **Smart Capacity Planning**: Mints sufficient RBTY tokens to cover future validator rewards
-- ✅ **Flexible Reward Claims**: Harvest validator earnings while keeping stake active
+- ✅ **Smart Capacity Planning**: Mints sufficient RBTY tokens to cover future staking rewards
+- ✅ **Flexible Reward Claims**: Harvest staking earnings while keeping stake active
 - ✅ **Production-Ready Economics**: Proper token minting and transfer mechanics
 
 **Functions:**
-- `initialize_pool` - Set up validator staking pool with reward rate
-- `stake_rbt` - Stake RBT to support validators and mint RBTY tokens
-- `claim_yield` - Claim accumulated validator rewards
+- `initialize_pool` - Set up staking pool with reward rate
+- `stake_rbt` - Stake RBT tokens and mint RBTY tokens
+- `claim_yield` - Claim accumulated staking rewards
 - `withdraw_stake` - Withdraw stake + all earned rewards
 - `get_stake_info` - View individual staker position
 - `get_pool_stats` - View overall pool statistics
@@ -25,8 +25,8 @@ A sophisticated RBT staking contract enabling users to stake tokens in support o
 
 ### **Build Contracts**
 ```bash
-# Build validator social contract
-cd validator-social
+# Build RBT staking contract
+cd RBT-staking
 cargo build --target wasm32-unknown-unknown
 ```
 
@@ -34,7 +34,7 @@ cargo build --target wasm32-unknown-unknown
 ```bash
 # Deploy using rubix-nexus
 rubix-nexus contract deploy \
-  --contract-dir validator-social \
+  --contract-dir RBT-staking \
   --deployer-did <your-did> \
   --deploy-amt 0.001
 ```
@@ -43,9 +43,9 @@ rubix-nexus contract deploy \
 ```bash
 # Execute contract with message file
 rubix-nexus contract execute \
-  --contract-dir validator-social \
+  --contract-dir RBT-staking \
   --contract-hash <contract-hash> \
-  --contract-msg-file validator-social/examples/stake_request.json \
+  --contract-msg-file RBT-staking/examples/stake_request.json \
   --executor-did <your-did>
 ```
 
@@ -71,7 +71,7 @@ done
 
 ## 📊 **Economics & Tokenomics**
 
-### **Validator Social Staking**
+### **RBT Token Staking**
 - **Reward Mechanism**: Block-based reward calculation (~3.15M blocks/year)
 - **Token Model**: Unique RBTY tokens per stake with capacity planning
 - **Yield Distribution**: Configurable annual percentage yield (APY)
@@ -107,7 +107,7 @@ Each contract includes comprehensive examples in `/examples/` directories:
 
 ### **Contract Structure**
 ```
-validator-social/
+RBT-staking/
 ├── src/lib.rs           # Main contract logic
 ├── examples/            # JSON request examples
 ├── Cargo.toml          # Rust dependencies
@@ -139,5 +139,5 @@ MIT License - see individual contract directories for specific terms.
 
 ---
 
-**Built for the Rubix Blockchain Ecosystem** - Enabling decentralized validator economics and token staking mechanisms.
+**Built for the Rubix Blockchain Ecosystem** - Enabling decentralized token staking mechanisms and reward distribution.
 

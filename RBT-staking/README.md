@@ -1,21 +1,21 @@
-# Validator Social - RBT Staking Contract
+# RBT Staking Contract
 
-A production-ready Rubix smart contract for social validator staking. Users can stake RBT tokens to support validators and receive fungible yield tokens representing their stake and accumulated rewards.
+A production-ready Rubix smart contract for RBT token staking. Users can stake RBT tokens and receive fungible yield tokens representing their stake and accumulated rewards.
 
 ## Features
 
 ✅ **Real Token Integration**: Uses actual Rubix FT APIs (`call_mint_ft_api`, `call_transfer_ft_api`)
-✅ **Validator Staking Tokens**: Creates unique RBTY fungible tokens for each validator stake
-✅ **Smart Capacity Planning**: Mints sufficient tokens to cover future validator rewards
-✅ **Flexible Reward Claims**: Harvest validator rewards while keeping stake active
-✅ **Complete Stake Management**: Withdraw stake + all accumulated validator rewards
-✅ **Transparent Validator Tracking**: Real-time stake information and validator pool statistics
+✅ **RBT Staking Tokens**: Creates unique RBTY fungible tokens for each RBT stake
+✅ **Smart Capacity Planning**: Mints sufficient tokens to cover future staking rewards
+✅ **Flexible Reward Claims**: Harvest staking rewards while keeping stake active
+✅ **Complete Stake Management**: Withdraw stake + all accumulated staking rewards
+✅ **Transparent Stake Tracking**: Real-time stake information and staking pool statistics
 
 ## Key Features
 
-- ✅ **Production-Ready Token Economics**: Properly mints capacity for future validator rewards
+- ✅ **Production-Ready Token Economics**: Properly mints capacity for future staking rewards
 - ✅ **Safe State Management**: Secure contract state handling without unsafe operations
-- ✅ **Block-based Rewards**: Accurate time-based validator reward calculation
+- ✅ **Block-based Rewards**: Accurate time-based staking reward calculation
 - ✅ **Multiple Claim Support**: Users can claim rewards multiple times
 - ✅ **Comprehensive Validation**: Robust input validation and error handling
 
@@ -102,14 +102,14 @@ Retrieves overall validator staking pool statistics.
 
 1. **Build the contract:**
    ```bash
-   cd validator-social
+   cd RBT-staking
    cargo build --target wasm32-unknown-unknown
    ```
 
 2. **Deploy using rubix-nexus:**
    ```bash
    rubix-nexus contract deploy \
-     --contract-dir validator-social \
+     --contract-dir RBT-staking \
      --deployer-did <your-did> \
      --deploy-amt 0.001
    ```
@@ -120,7 +120,7 @@ After deployment, you'll receive a contract hash (starting with `Qm`). Use this 
 
 ```bash
 rubix-nexus contract execute \
-  --contract-dir validator-social \
+  --contract-dir RBT-staking \
   --contract-hash <contract-hash> \
   --contract-msg-file examples/stake_request.json \
   --executor-did <your-did>

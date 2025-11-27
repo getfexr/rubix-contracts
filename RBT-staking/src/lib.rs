@@ -3,6 +3,8 @@ use rubixwasm_std::{call_mint_ft_api, call_transfer_ft_api};
 use rubixwasm_std::helpers::{MintFt, TransferFt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::slice;
+use std::str;
 
 // Contract state structure
 #[derive(Serialize, Deserialize, Clone)]
@@ -77,6 +79,9 @@ pub fn initialize_pool(input: InitializePoolRequest) -> Result<String, WasmError
         stakers: HashMap::new(),
     };
 
+    // Save initial pool state to persistent storage
+    save_pool_state(&pool)?;
+
     let response = StakingResponse {
         success: true,
         message: format!("Staking pool initialized with {}% annual yield rate", input.annual_yield_rate),
@@ -134,6 +139,9 @@ pub fn stake_rbt(input: StakeRequest) -> Result<String, WasmError> {
             pool.stakers.insert(input.staker_did.clone(), stake_info);
             pool.total_staked += input.amount;
 
+            // Save updated state to persistent storage
+            save_pool_state(&pool)?;
+
             let response = StakingResponse {
                 success: true,
                 message: format!("Successfully staked {} RBT and minted yield tokens", input.amount),
@@ -188,6 +196,9 @@ pub fn withdraw_stake(input: WithdrawRequest) -> Result<String, WasmError> {
             pool.stakers.remove(&input.staker_did);
             pool.total_staked -= amount_staked;
 
+            // Save updated state to persistent storage
+            save_pool_state(&pool)?;
+
             let response = StakingResponse {
                 success: true,
                 message: format!("Successfully withdrew {} total tokens ({}RBT principal + {} yield)",
@@ -214,22 +225,27 @@ pub fn withdraw_stake(input: WithdrawRequest) -> Result<String, WasmError> {
 pub fn claim_yield(input: ClaimYieldRequest) -> Result<String, WasmError> {
     let mut pool = get_current_pool_state(input.current_block)?;
 
-    let staker_info = pool.stakers.get_mut(&input.staker_did)
-        .ok_or_else(|| WasmError::from("Staker not found"))?;
+    // Get staker info and clone needed values first
+    let (yield_earned, yield_token_id, remaining_stake) = {
+        let staker_info = pool.stakers.get(&input.staker_did)
+            .ok_or_else(|| WasmError::from("Staker not found"))?;
 
-    // Calculate yield earned since last claim
-    let blocks_since_last_claim = input.current_block - staker_info.last_claim_block;
-    let yield_earned = calculate_yield(staker_info.amount_staked, blocks_since_last_claim, pool.annual_yield_rate);
+        // Calculate yield earned since last claim
+        let blocks_since_last_claim = input.current_block - staker_info.last_claim_block;
+        let yield_earned = calculate_yield(staker_info.amount_staked, blocks_since_last_claim, pool.annual_yield_rate);
 
-    if yield_earned == 0 {
-        return Err(WasmError::from("No yield tokens to claim"));
-    }
+        if yield_earned == 0 {
+            return Err(WasmError::from("No yield tokens to claim"));
+        }
+
+        (yield_earned, staker_info.yield_token_id.clone(), staker_info.amount_staked)
+    };
 
     // Transfer only the yield portion using the yield token
     let transfer_info = TransferFt {
         comment: format!("Claiming {} yield tokens", yield_earned),
         ft_count: yield_earned as i32,
-        ft_name: staker_info.yield_token_id.clone(),
+        ft_name: yield_token_id.clone(),
         creatorDID: input.staker_did.clone(),
         receiver: input.staker_did.clone(),
         sender: "staking_contract".to_string(),
@@ -237,8 +253,12 @@ pub fn claim_yield(input: ClaimYieldRequest) -> Result<String, WasmError> {
 
     match call_transfer_ft_api(transfer_info) {
         Ok(_) => {
-            // Update last claim block
+            // Now update last claim block with mutable borrow
+            let staker_info = pool.stakers.get_mut(&input.staker_did).unwrap();
             staker_info.last_claim_block = input.current_block;
+
+            // Save updated state to persistent storage
+            save_pool_state(&pool)?;
 
             let response = StakingResponse {
                 success: true,
@@ -246,8 +266,8 @@ pub fn claim_yield(input: ClaimYieldRequest) -> Result<String, WasmError> {
                 data: Some(serde_json::json!({
                     "staker_did": input.staker_did,
                     "yield_claimed": yield_earned,
-                    "remaining_stake": staker_info.amount_staked,
-                    "yield_token_id": staker_info.yield_token_id
+                    "remaining_stake": remaining_stake,
+                    "yield_token_id": yield_token_id
                 })),
             };
 
@@ -315,14 +335,36 @@ pub fn get_pool_stats(input: GetPoolStatsRequest) -> Result<String, WasmError> {
 
 // Helper functions
 fn get_current_pool_state(current_block: u64) -> Result<StakingPool, WasmError> {
-    // In a real implementation, this would read from persistent contract storage
-    // For now, we'll return a default pool with demo data
-    Ok(StakingPool {
-        total_staked: 0,  // Start with no stakes
+    // Try to load existing state from persistent storage
+    match call_get_pool_state_from_storage() {
+        Ok(state_json) => {
+            // Parse the stored JSON state
+            match serde_json::from_str::<StakingPool>(&state_json) {
+                Ok(mut pool) => {
+                    // Update last_update_block to current
+                    pool.last_update_block = current_block;
+                    Ok(pool)
+                }
+                Err(_) => {
+                    // If parsing fails, return default state
+                    Ok(get_default_pool_state(current_block))
+                }
+            }
+        }
+        Err(_) => {
+            // If no state exists, return default state
+            Ok(get_default_pool_state(current_block))
+        }
+    }
+}
+
+fn get_default_pool_state(current_block: u64) -> StakingPool {
+    StakingPool {
+        total_staked: 0,
         annual_yield_rate: 10, // 10% default APY
         last_update_block: current_block,
         stakers: HashMap::new(),
-    })
+    }
 }
 
 // Calculate yield for a given stake amount over time
@@ -345,3 +387,82 @@ fn calculate_max_yield(stake_amount: u64, annual_rate: u64) -> u64 {
     const MAX_BLOCKS_STAKED: u64 = 3_153_600 * 2; // 2 years
     calculate_yield(stake_amount, MAX_BLOCKS_STAKED, annual_rate)
 }
+
+// Save updated pool state to persistent storage
+fn save_pool_state(pool: &StakingPool) -> Result<(), WasmError> {
+    let state_json = serde_json::to_string(pool)
+        .map_err(|_| WasmError::from("Failed to serialize pool state"))?;
+    call_save_pool_state_to_storage(&state_json)
+}
+
+// Persistent storage functions (following bidding_contract pattern)
+mod state_storage {
+    use super::*;
+
+    // External functions provided by Rubix WASM host
+    extern "C" {
+        pub fn get_pool_state_from_storage(
+            out_state_ptr: *mut *const u8,
+            out_state_len: *mut usize
+        ) -> i32;
+
+        pub fn save_pool_state_to_storage(
+            in_state_ptr: *const u8,
+            in_state_len: usize,
+        ) -> i32;
+    }
+
+    pub fn call_get_pool_state_from_storage() -> Result<String, WasmError> {
+        unsafe {
+            // Allocate space for the response pointer and length
+            let mut state_ptr: *const u8 = std::ptr::null();
+            let mut state_len: usize = 0;
+
+            // Call the imported host function
+            let result = get_pool_state_from_storage(
+                &mut state_ptr,
+                &mut state_len,
+            );
+
+            if result != 0 {
+                return Err(WasmError::from(format!("Host function returned error code {}", result)));
+            }
+
+            // Ensure the response pointer is not null
+            if state_ptr.is_null() {
+                return Err(WasmError::from("State pointer is null".to_string()));
+            }
+
+            // Convert the response back to a Rust String
+            let response_slice = slice::from_raw_parts(state_ptr, state_len);
+            match str::from_utf8(response_slice) {
+                Ok(s) => Ok(s.to_string()),
+                Err(_) => Err(WasmError::from("Invalid UTF-8 state response".to_string())),
+            }
+        }
+    }
+
+    pub fn call_save_pool_state_to_storage(state_json: &str) -> Result<(), WasmError> {
+        unsafe {
+            // Convert the state string to bytes
+            let state_bytes = state_json.as_bytes();
+            let state_ptr = state_bytes.as_ptr();
+            let state_len = state_bytes.len();
+
+            // Call the imported host function
+            let result = save_pool_state_to_storage(
+                state_ptr,
+                state_len,
+            );
+
+            if result != 0 {
+                return Err(WasmError::from(format!("Host function returned error code {}", result)));
+            }
+
+            Ok(())
+        }
+    }
+}
+
+// Re-export state storage functions
+pub use state_storage::{call_get_pool_state_from_storage, call_save_pool_state_to_storage};
