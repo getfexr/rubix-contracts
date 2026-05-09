@@ -1,3 +1,13 @@
-RBT-staking/target/*
-RBT-staking/.DS_Store
-RBT-staking/Cargo.lock
+# Rust
+agent_staking/target/
+agent_staking/Cargo.lock
+
+# Go
+agent_staking/dapp/agent-staking-dapp
+
+# State (runtime file, not committed)
+agent_staking/dapp/state/agent_state.json
+
+# macOS
+.DS_Store
+**/.DS_Store

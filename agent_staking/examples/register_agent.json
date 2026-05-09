@@ -1,0 +1,8 @@
+{
+  "register_agent": {
+    "agent_did": "bafybmiabc123exampleagentdid456xyz789def",
+    "agent_name": "TradeBot-Alpha",
+    "agent_type": "trading",
+    "timestamp": 1700000000
+  }
+}

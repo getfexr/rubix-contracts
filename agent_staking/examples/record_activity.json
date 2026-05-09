@@ -1,0 +1,9 @@
+{
+  "record_activity": {
+    "agent_did": "bafybmiabc123exampleagentdid456xyz789def",
+    "activity_type": "trade",
+    "activity_data": "{\"pair\":\"BTC/USDT\",\"side\":\"buy\",\"amount\":0.01,\"price\":65000}",
+    "timestamp": 1700000120,
+    "tx_ref": "txn_abc123"
+  }
+}
