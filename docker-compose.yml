@@ -1,0 +1,39 @@
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  agent-staking-dapp:
+    build:
+      context: agent_staking/dapp
+    <<: *logging
+    environment:
+      RUBIX_NODE_URL: ${RUBIX_NODE_URL:-http://localhost:20000}
+      WASM_PATH: /app/agent_staking.wasm
+      DB_PATH: /data/agent_activity.db
+      DAPP_PORT: ":6001"
+    volumes:
+      - agent-staking-data:/data
+      - ./artifacts/agent_staking.wasm:/app/agent_staking.wasm:ro
+    network_mode: host
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256MB
+        reservations:
+          cpus: '0.05'
+          memory: 64MB
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:6001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  agent-staking-data:
