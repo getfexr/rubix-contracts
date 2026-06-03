@@ -1,306 +1,438 @@
 # rbt-contracts
 
-Smart contracts for the [Fexr](https://getfexr.com) platform — on-chain infrastructure for human + agent governance on Rubix.
+On-chain agent staking and activity auditing for the [Fexr](https://getfexr.com) platform, built on the [Rubix](https://rubix.network) blockchain.
 
-## What this repo does
+Contracts are written in Rust, compiled to WASM, and executed by the Rubix node. A Go dapp runs alongside the node to handle execution callbacks and provide a query API over the persisted activity history.
 
-Each contract in this repo represents a deployable unit of on-chain logic. Currently:
+---
 
-| Contract | Purpose |
+## What this repo contains
+
+| Path | Description |
 |---|---|
-| `agent_staking` | Registers AI agents on-chain, stakes 1 RBT per agent, and creates an immutable activity log for every action the agent takes |
-
-Contracts are written in Rust, compiled to WASM, and executed on the Rubix blockchain. A Go dapp runs alongside the Rubix node to handle execution callbacks and persist contract state.
+| `agent_staking/src/lib.rs` | Rust smart contract — WASM execution target |
+| `agent_staking/dapp/` | Go dapp — callback handler, SQLite persistence, query API |
+| `artifacts/agent_staking.wasm` | Pre-built WASM binary (deploy without Rust toolchain) |
+| `scripts/deploy_agent_staking.py` | One-shot deploy + register script |
+| `scripts/setup_quorum_dids.py` | 16-DID quorum coverage script |
+| `docker-compose.yml` | Runs the dapp on the Rubix VM |
+| `VM1_SETUP.md` | Full end-to-end Rubix VM setup runbook |
+| `scripts/QUORUM_SETUP.md` | Quorum DID strategy explanation |
 
 ---
 
 ## Architecture
 
 ```
-VM1 (Rubix VM)                         VM2 (Executor VM)
-├── rubixgoplatform (node :20011)        └── executor service
-├── artifacts/agent_staking.wasm              └── calls VM1:20011 for execute-smart-contract
-├── agent_staking/dapp (Go, :6001)
-│    └── receives callbacks from node
-│    └── runs WASM, reads/writes state
-└── state/agent_state.json
+Rubix VM (VM1)                               Executor VM (VM2)
+├── rubixgoplatform                           └── executor service
+│    ├── node API  :20000                          ├── POST /api/execute-smart-contract
+│    └── embedded IPFS                             └── GET  <VM1>:6001/activities
+│                                                       GET  <VM1>:6001/batch/{hash}
+├── agent-staking-dapp  :6001
+│    ├── POST /          ← Rubix node callback on every execution
+│    ├── GET  /activities
+│    ├── GET  /batch/{hash}
+│    └── GET  /health
+│
+└── SQLite  /data/agent_activity.db
 ```
 
-- The Rubix node and Go dapp live on the same VM — node callbacks to dapp are localhost-to-localhost
-- The executor service on VM2 calls the Rubix node API directly; it never talks to the dapp
-- For other chains (Polygon, Solana): contract code lives with the executor service on VM2, connects to external RPC nodes
+**How a contract execution flows:**
+
+1. The executor service calls `POST /api/execute-smart-contract` on the Rubix node
+2. The node runs quorum consensus and calls `POST http://localhost:6001/` on the dapp
+3. The dapp dispatches the call to the WASM module, which reads/writes state via host functions
+4. The dapp writes full batch JSON to SQLite; only compact roots (hash + metadata) enter WASM state
+5. The node records the result in the blockchain and returns to the executor service
+
+The executor service never talks to the dapp directly for writes — everything goes through the Rubix node. The dapp's `/activities` and `/batch/{hash}` endpoints are read-only and used directly by the executor service for audit queries.
 
 ---
 
-## Repo structure
+## Contract — `agent_staking`
 
-```
-rbt-contracts/
-├── artifacts/
-│   └── agent_staking.wasm          pre-built WASM binary
-├── agent_staking/
-│   ├── src/lib.rs                  Rust contract (compile target)
-│   ├── Cargo.toml
-│   └── dapp/
-│       ├── main.go                 Go dapp server (callback handler)
-│       ├── host/
-│       │   ├── host_get_state.go   host fn: load state into WASM memory
-│       │   └── host_save_state.go  host fn: write state from WASM memory
-│       ├── state/
-│       │   ├── state.go            file-based state persistence
-│       │   └── agent_state.json    live state file (runtime)
-│       └── go.mod
-├── scripts/
-│   └── deploy_agent_staking.py     deploy script (generate → deploy → register)
-└── deploy_testnet.sh               one-shot build + deploy
-```
+### State model
 
----
+WASM state is kept lean regardless of activity volume. Full activity records live in the dapp's SQLite database and are accessible via the query API.
 
-## Contract functions — agent_staking
+| Field | Type | Stored in |
+|---|---|---|
+| `agent_did` | string | WASM state |
+| `agent_name` | string | WASM state |
+| `agent_type` | string | WASM state |
+| `status` | `"active"` \| `"suspended"` | WASM state |
+| `stake_amount` | float (always 1.0) | WASM state |
+| `registered_at` | unix ms | WASM state |
+| `activity_count` | uint64 | WASM state |
+| `last_activity_at` | unix ms | WASM state |
+| `reputation_score` | float 0–100 | WASM state |
+| `batch_count` | uint64 | WASM state |
+| `batch_roots` | array (capped at 500) | WASM state |
+| Full batch JSON | blob | SQLite only |
+| Individual activity records | rows | SQLite only |
 
-| Function | Description |
-|---|---|
-| `register_agent` | Registers the agent DID, name, type. Idempotent — safe to call again on an already-registered agent. Requires 1 RBT staked at deploy time. |
-| `record_activity` | Appends an activity record (type, data, timestamp, tx ref) to the agent's immutable history. Rejected if agent is suspended. |
-| `get_agent_info` | Returns full agent state: DID, name, type, status, stake, registration time, activity count, full activity history. |
-| `update_status` | Sets agent status to `active` or `suspended`. Only the registered DID can call this. A suspended agent cannot record activity. |
+### Contract functions
 
-Agent types: `trading` | `advisory` | `monitoring` | `general`
+All calls go through `POST /api/execute-smart-contract` on the Rubix node as `smartContractData` JSON with the shape:
 
-Payload format (passed as `smartContractData` to `/api/execute-smart-contract`):
 ```json
-{ "register_agent": { "agent_did": "bafybmi...", "agent_name": "MyAgent", "agent_type": "trading", "timestamp": 1700000000 } }
-{ "record_activity": { "agent_did": "bafybmi...", "activity_type": "trade", "activity_data": "{\"pair\":\"BTC/USDT\"}", "timestamp": 1700000120, "tx_ref": "txn_abc" } }
-{ "get_agent_info": { "agent_did": "bafybmi..." } }
-{ "update_status": { "agent_did": "bafybmi...", "status": "suspended" } }
+{ "function": "<name>", "params": { ... } }
 ```
 
 ---
 
-## VM1 setup — Rubix VM
+#### `register_agent`
+
+Registers the agent DID, name, and type. One-time setup called during deployment. Idempotent — re-calling with the same DID is a no-op and returns current state.
+
+**Request:**
+```json
+{
+  "function": "register_agent",
+  "params": {
+    "agent_did":   "bafybmi...",
+    "agent_name":  "MyAgent",
+    "agent_type":  "trading",
+    "timestamp":   1700000000000
+  }
+}
+```
+
+`agent_type` must be one of: `trading` | `advisory` | `monitoring` | `general`
+
+`agent_did` becomes the contract owner. Every subsequent write call must supply this same DID — mismatches are rejected with a hard error.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Agent bafybmi... registered with 1 RBT stake",
+  "data": { "<full AgentState>" }
+}
+```
+
+---
+
+#### `record_activity_batch`
+
+Primary write path. Commits a batch of activities in a single consensus round. The full batch JSON is stored in dapp SQLite; only a compact root (hash + counters) enters WASM state. Reputation score is recomputed after each commit.
+
+**Request:**
+```json
+{
+  "function": "record_activity_batch",
+  "params": {
+    "agent_did":        "bafybmi...",
+    "batch_hash":       "sha256hex...",
+    "activity_count":   42,
+    "period_start":     1700000000000,
+    "period_end":       1700003600000,
+    "dominant_action":  "trade",
+    "full_batch_json":  "{\"activities\":[...]}"
+  }
+}
+```
+
+`batch_hash` is the SHA-256 hex of `full_batch_json`, computed by the caller before submission. The contract does not re-hash; it trusts and stores what it receives. Verifiers can recompute the hash from SQLite to confirm integrity.
+
+`dominant_action` is the most frequent `activity_type` string in the batch — used in lightweight on-chain summaries.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Batch 'sha256hex...' committed for agent bafybmi.... Total activities: 1042. Reputation: 73.4",
+  "data": {
+    "batch_hash":       "sha256hex...",
+    "batch_count":      25,
+    "activity_count":   1042,
+    "reputation_score": 73.4,
+    "last_activity_at": 1700003600000
+  }
+}
+```
+
+WASM state holds at most 500 batch roots. Older roots roll off the in-memory window but remain permanently in SQLite and are queryable via `/batch/{hash}`.
+
+---
+
+#### `record_activity`
+
+Records a single activity. Intended for low-volume or testing use. For production throughput, prefer `record_activity_batch`.
+
+**Request:**
+```json
+{
+  "function": "record_activity",
+  "params": {
+    "agent_did":      "bafybmi...",
+    "activity_type":  "trade",
+    "activity_data":  "{\"pair\":\"BTC/USDT\",\"side\":\"buy\"}",
+    "timestamp":      1700000120000,
+    "tx_ref":         "txn_abc123"
+  }
+}
+```
+
+`activity_data` is a free-form JSON string. `tx_ref` is optional.
+
+Reputation is recomputed every 10 single records.
+
+---
+
+#### `get_agent_info`
+
+Read-only. Returns full WASM state including all batch roots currently in the 500-entry window.
+
+**Request:**
+```json
+{
+  "function": "get_agent_info",
+  "params": {
+    "agent_did": "bafybmi..."
+  }
+}
+```
+
+`agent_did` is optional — if omitted, returns state for the registered agent.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Agent info retrieved",
+  "data": {
+    "agent_did":        "bafybmi...",
+    "agent_name":       "MyAgent",
+    "agent_type":       "trading",
+    "status":           "active",
+    "stake_amount":     1.0,
+    "registered_at":    1700000000000,
+    "activity_count":   1042,
+    "last_activity_at": 1700003600000,
+    "reputation_score": 73.4,
+    "batch_count":      25,
+    "batch_roots": [
+      {
+        "batch_hash":      "sha256hex...",
+        "activity_count":  42,
+        "period_start":    1700000000000,
+        "period_end":      1700003600000,
+        "committed_at":    1700003600000,
+        "dominant_action": "trade"
+      }
+    ]
+  }
+}
+```
+
+---
+
+#### `update_status`
+
+Sets agent status to `active` or `suspended`. Only the registered agent DID can call this. A suspended agent cannot record activity.
+
+**Request:**
+```json
+{
+  "function": "update_status",
+  "params": {
+    "agent_did": "bafybmi...",
+    "status":    "suspended"
+  }
+}
+```
+
+---
+
+### Reputation scoring
+
+Reputation (0–100) is recomputed after every `record_activity_batch` call and every 10th `record_activity` call. It is a pure function of WASM state plus a single host call for recent activity count — no external oracles.
+
+| Component | Weight | Description |
+|---|---|---|
+| Velocity | 30 | Actions/day over last 7 days, target 50/day |
+| Volume | 40 | log₂ scale, saturates at ~10 000 total actions |
+| Recency | 20 | Exponential decay, half-life 3 days |
+| Tenure | 10 | Linear ramp, saturates at 30 days |
+
+The score is visible on-chain in WASM state and returned in every write response.
+
+---
+
+## Dapp query API
+
+The dapp exposes three read-only HTTP endpoints used by the executor service for audit queries. These bypass consensus — they read directly from SQLite.
+
+### `GET /activities`
+
+Returns individual activity records stored by `record_activity` calls.
+
+**Query parameters:**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `from_ts` | `0` | Start of time range (unix ms) |
+| `to_ts` | now | End of time range (unix ms) |
+| `limit` | `100` | Max rows returned |
+
+**Response:**
+```json
+{
+  "activities": [
+    {
+      "activity_type": "trade",
+      "activity_data": "{\"pair\":\"BTC/USDT\"}",
+      "timestamp":     1700000120000,
+      "tx_ref":        "txn_abc123"
+    }
+  ],
+  "count": 1
+}
+```
+
+### `GET /batch/{hash}`
+
+Returns the full JSON payload of a committed batch by its SHA-256 hash.
+
+**Response:** The raw JSON string passed as `full_batch_json` at commit time, or `404` if not found.
+
+### `GET /health`
+
+Returns dapp liveness and current WASM state.
+
+**Response:**
+```json
+{
+  "status":  "ok",
+  "db_path": "/data/agent_activity.db",
+  "state":   { "<current AgentState or null>" }
+}
+```
+
+---
+
+## Deployment
+
+See **[VM1_SETUP.md](./VM1_SETUP.md)** for the complete end-to-end Rubix VM setup runbook, covering:
+
+- Node startup and health check
+- Deployer DID creation (node-side, password signing)
+- Executor key pair generation (secp256k1, self-custody)
+- Executor DID registration via `/api/request-did-for-pubkey`
+- RBT funding requirements
+- Contract deploy + `register_agent` initialisation
+- Dapp build and startup via Docker
+- Callback URL registration with the Rubix node
+- Port firewall rules
+- 16-DID quorum coverage setup
+
+### Quick deploy reference
+
+```bash
+# On VM1, after node is running and DIDs are funded:
+cd $REPO_DIR
+
+RUBIX_NODE_URL=http://localhost:<NODE_PORT> \
+DEPLOYER_DID=<deployer bafybmi...> \
+AGENT_DID=<executor bafybmi...> \
+AGENT_NAME=MyAgent \
+AGENT_TYPE=trading \
+PASSPHRASE=<deployer password> \
+python3 scripts/deploy_agent_staking.py
+```
+
+`AGENT_DID` is the executor service's DID — the identity the WASM contract stores as its owner. Every future `record_activity_batch` call must supply this same DID. It must match `AGENT_STAKING_EXECUTOR_DID` in the executor service config.
+
+The script prints the contract address on success:
+
+```
+✓ Deployment complete!
+  Contract address : Qm...
+```
+
+---
+
+## Building from source
+
+The pre-built WASM binary at `artifacts/agent_staking.wasm` is committed to this repo. You only need to rebuild if you modify `agent_staking/src/lib.rs`.
 
 ### Prerequisites
 
-- Rubix node (`rubixgoplatform`) running on port `20011`
-- Deployer DID created on the node with at least **1 RBT** balance
-- Rust with `wasm32-unknown-unknown` target
-- Go 1.21+
-- Python 3 + `requests` (`pip install requests`)
-- `rubix-wasm` repo cloned as a sibling to this repo (required by `go.mod` replace directive)
-
-Required directory layout on VM1:
-
-```
-/home/ubuntu/                        (or any common parent)
-├── rbt-contracts/                   this repo
-└── Rubix/
-    └── rubix-wasm/
-        └── go-wasm-bridge/          required by agent_staking/dapp/go.mod
-```
-
-Clone rubix-wasm if not present:
 ```bash
-git clone https://github.com/rubixchain/rubix-wasm Rubix/rubix-wasm
-```
-
-### Step 1 — Install Rust target
-
-```bash
+# Rust with WASM target
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add wasm32-unknown-unknown
+
+# rubixwasm-std (local dependency — clone alongside this repo)
+git clone https://github.com/rubixchain/rubix-wasm ../rubix-wasm
 ```
 
-### Step 2 — Build the WASM binary
+The `Cargo.toml` references `rubixwasm-std` via a relative path. The expected layout:
+
+```
+parent/
+├── rbt-contracts/       ← this repo
+└── rubix-wasm/
+    └── packages/
+        └── std/
+```
+
+### Build
 
 ```bash
-cd rbt-contracts/agent_staking
-cargo build --target wasm32-unknown-unknown --release
-cp target/wasm32-unknown-unknown/release/agent_staking.wasm ../artifacts/
-```
-
-### Step 3 — Build the Go dapp
-
-```bash
-cd rbt-contracts/agent_staking/dapp
-go build -o agent-staking-dapp .
-```
-
-### Step 4 — Start the dapp
-
-Start this **before** deploying the contract. The Rubix node will attempt a callback on the first execute call.
-
-```bash
-cd rbt-contracts/agent_staking/dapp
-
-WASM_PATH=/home/ubuntu/rbt-contracts/artifacts/agent_staking.wasm \
-RUBIX_NODE_URL=http://localhost:20011 \
-DAPP_PORT=:6001 \
-./agent-staking-dapp
-```
-
-To run as a background service, use `systemd` or `screen`:
-```bash
-screen -S agent-dapp
-# run the command above, then Ctrl+A D to detach
-```
-
-### Step 5 — Deploy the contract
-
-```bash
-cd rbt-contracts
-
-RUBIX_NODE_URL=http://localhost:20011 \
-DEPLOYER_DID=bafybmi... \
-PASSPHRASE=yourpassword \
-python3 scripts/deploy_agent_staking.py
-```
-
-This runs three steps automatically:
-1. Uploads WASM + source to node IPFS → returns contract address (IPFS CID)
-2. Deploys the contract, locking 1 RBT in the genesis block via quorum consensus
-3. Calls `register_agent` to initialise on-chain state
-
-**Save the output.** You will need `AGENT_STAKING_CONTRACT_ADDRESS`.
-
-### Step 6 — Register dapp URL with the node
-
-The Rubix node must know where to POST execution callbacks. Run this once after deploy:
-
-```bash
-curl -X POST http://localhost:20011/api/subscribe-smart-contract \
-  -H "Content-Type: application/json" \
-  -d '{
-    "contract": "<AGENT_STAKING_CONTRACT_ADDRESS>",
-    "dappURL": "http://localhost:6001"
-  }'
-```
-
-Verify with Rubix documentation if the endpoint or field names differ for your node version.
-
----
-
-## VM2 setup — Executor VM
-
-No contract code or dapp runs here. The executor service talks to the Rubix node on VM1 via HTTP.
-
-Add to your executor service `.env`:
-```env
-RUBIX_NODE_URL=http://<VM1-IP>:20011
-AGENT_STAKING_CONTRACT_ADDRESS=<from deploy step 5>
-AGENT_STAKING_EXECUTOR_DID=<EXECUTOR_DID from deploy output>
-```
-
-Ensure VM2 can reach VM1 on port `20011` (outbound). No inbound ports required on VM2 for Rubix.
-
----
-
-## Rebuilding after contract changes
-
-```bash
-# 1. rebuild WASM
 cd agent_staking
 cargo build --target wasm32-unknown-unknown --release
 cp target/wasm32-unknown-unknown/release/agent_staking.wasm ../artifacts/
-
-# 2. redeploy (new contract address each time)
-cd ..
-RUBIX_NODE_URL=http://localhost:20011 \
-DEPLOYER_DID=bafybmi... \
-PASSPHRASE=yourpassword \
-python3 scripts/deploy_agent_staking.py
-
-# 3. update AGENT_STAKING_CONTRACT_ADDRESS in your executor service .env
-# 4. re-register dapp URL (step 6 above)
-# 5. restart dapp (new WASM_PATH if changed)
 ```
 
-Each deploy produces a new contract address. The old contract and its state remain on-chain but your executor service must be pointed to the new address.
+Commit the updated `artifacts/agent_staking.wasm` and redeploy — each deploy produces a new contract address.
 
 ---
 
-## Common issues
+## Quorum node setup
 
-### `go build` fails with missing module
-
-```
-cannot find module providing github.com/rubixchain/rubix-wasm/go-wasm-bridge
-```
-
-The `replace` directive in `agent_staking/dapp/go.mod` points to a local path:
-```
-replace github.com/rubixchain/rubix-wasm/go-wasm-bridge => ../../../../Rubix/rubix-wasm/go-wasm-bridge
-```
-
-Fix: clone `rubix-wasm` so it sits at `../../../Rubix/rubix-wasm` relative to `rbt-contracts`. See VM1 Prerequisites above for the required layout.
-
----
-
-### Deploy script fails — WASM not found
-
-```
-ERROR: WASM artifact not found at .../artifacts/agent_staking.wasm
-```
-
-Run Step 2 (build WASM) first.
-
----
-
-### Deploy script fails — DID not set
-
-```
-ERROR: Set DEPLOYER_DID env var
-```
-
-The deployer DID must already exist on the Rubix node and have at least 1 RBT. Create one via `/api/createdid` or `/api/request-did-for-pubkey` on the node before deploying.
-
----
-
-### Contract executes but state is not updated
-
-The dapp is not running or not reachable. The Rubix node ran consensus but the callback to `:6001` failed silently.
-
-- Confirm the dapp is running: `curl -X POST http://localhost:6001/` — should return a JSON error (not connection refused)
-- Confirm dapp URL is registered with the node (Step 6)
-- Check dapp logs for callback errors
-
----
-
-### State resets between dapp restarts
-
-The dapp resolves `agent_state.json` relative to the binary's directory:
-```
-<binary dir>/state/agent_state.json
-```
-
-If you move the binary or run it from a different directory, it won't find the existing state file. Always run the dapp from the same directory, or verify the `state/` path is consistent.
-
----
-
-### `execute-smart-contract` returns success but register_agent has no effect
-
-The dapp may have started after the deploy script already sent the execute call. Stop the deploy mid-run, ensure the dapp is running, then re-run from Step 5.
-
----
-
-### Quorum consensus times out
-
-The Rubix node needs quorum peers to confirm the transaction. On a testnet with limited peers this can be slow or fail. Check node logs on VM1:
+See **[scripts/QUORUM_SETUP.md](./scripts/QUORUM_SETUP.md)** for a full explanation of the 16-DID quorum coverage strategy and how Rubix QuorumType 1 DID selection works.
 
 ```bash
-# rubixgoplatform logs (path depends on your setup)
-tail -f /path/to/rubix/node.log
+# Register one quorum DID per hex suffix (0–f)
+RUBIX_NODE_URL=http://localhost:<NODE_PORT> \
+PRIV_PWD=<password> \
+QUORUM_PWD=<password> \
+python3 scripts/setup_quorum_dids.py
 ```
 
 ---
 
 ## Environment variable reference
 
-| Variable | Used by | Description |
+### Dapp (`agent_staking/dapp`)
+
+| Variable | Default | Description |
 |---|---|---|
-| `RUBIX_NODE_URL` | dapp, deploy script, executor service | Rubix node API base URL. Default: `http://localhost:20011` |
-| `DEPLOYER_DID` | deploy script | Rubix DID of the deployer. Must have ≥ 1 RBT. |
-| `PASSPHRASE` | deploy script | Password for the deployer DID (password-based signing). |
-| `WASM_PATH` | dapp | Absolute path to `agent_staking.wasm`. Default: `../../../artifacts/agent_staking.wasm` |
-| `DAPP_PORT` | dapp | Port the dapp listens on. Default: `:6001` |
-| `AGENT_STAKING_CONTRACT_ADDRESS` | executor service | Contract address returned by the deploy script. |
-| `AGENT_STAKING_EXECUTOR_DID` | executor service | Executor DID, used to sign contract calls. |
+| `RUBIX_NODE_URL` | `http://localhost:20000` | Rubix node API base URL |
+| `WASM_PATH` | `../../../artifacts/agent_staking.wasm` | Path to WASM binary |
+| `DB_PATH` | `./state/agent_activity.db` | SQLite database path |
+| `DAPP_PORT` | `:6001` | Port the dapp listens on |
+
+### Deploy script (`scripts/deploy_agent_staking.py`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `RUBIX_NODE_URL` | no | Node API URL. Default: `http://localhost:20011` |
+| `DEPLOYER_DID` | **yes** | Node-side DID that signs the deploy. Must have ≥ 1 RBT. |
+| `AGENT_DID` | **yes** | Executor DID registered as contract owner. Must match executor service config. |
+| `PASSPHRASE` | no | Deployer DID password. Default: `mypassword` |
+| `AGENT_NAME` | no | Agent name written to on-chain state. Default: `agent` |
+| `AGENT_TYPE` | no | Agent type. One of: `trading`, `advisory`, `monitoring`, `general`. Default: `general` |
+
+### Executor service (VM2)
+
+| Variable | Description |
+|---|---|
+| `AGENT_STAKING_CONTRACT_ADDRESS` | Contract address returned by the deploy script |
+| `AGENT_STAKING_EXECUTOR_DID` | Executor DID — must match the DID registered via `register_agent` |
+| `AGENT_STAKING_PRIVATE_KEY_HEX` | Executor secp256k1 private key (hex, 64 chars) — signs contract calls |
+| `AGENT_STAKING_DAPP_URL` | Dapp base URL for read queries, e.g. `http://<VM1-IP>:6001` |
+| `RUBIX_NODE_URL` | Rubix node API URL, e.g. `http://<VM1-IP>:20000` |

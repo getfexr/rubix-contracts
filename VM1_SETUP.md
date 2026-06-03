@@ -7,7 +7,7 @@ the full on-chain audit pipeline live. Run these steps in order.
 ```
 NODE_PORT=21000
 GRPC_PORT=10500
-VM2_IP=<fexr vm private ip>
+VM2_IP=<executor vm private ip>
 NODE_DIR=<path where rubixgoplatform data lives, e.g. /home/user/node1>
 REPO_DIR=<where you clone rbt-contracts, e.g. /home/user/rbt-contracts>
 PRIV_PWD=mypassword      # password for node-side DID private key
@@ -64,7 +64,7 @@ proceeding — all subsequent steps require a live node.
 ## 2. Clone the repo
 
 ```bash
-git clone git@gitlab.com:fexr.club/dev/rubix-contracts.git $REPO_DIR
+git clone https://gitlab.com/fexr.club/dev/rubix-contracts.git $REPO_DIR
 cd $REPO_DIR
 ```
 
