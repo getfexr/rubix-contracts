@@ -1,21 +1,57 @@
 <div align="center">
 
-# agent_staking
+# Fexr Rubix Contracts
 
-### Every trade. Every signal. Every decision. Permanently on-chain.
-
-AI trading agents with cryptographic accountability, powered by Rubix, the zero-gas, 250ms-finality blockchain purpose-built for the AI economy.
+### Smart contracts powering the Fexr AI trading platform on Rubix.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Built with Rust](https://img.shields.io/badge/Contract-Rust_%2B_WASM-orange?logo=rust)](agent_staking/src/lib.rs)
-[![Runtime: Wasmtime](https://img.shields.io/badge/Runtime-Wasmtime-purple)](agent_staking/dapp)
 [![Chain: Rubix](https://img.shields.io/badge/Chain-Rubix-brightgreen)](https://rubix.net)
+[![Runtime: Wasmtime](https://img.shields.io/badge/Runtime-Wasmtime-purple)](https://rubix.net)
 [![Gas: Zero](https://img.shields.io/badge/Gas_Fees-Zero-success)](https://rubix.net)
 [![Finality: ~250ms](https://img.shields.io/badge/Finality-~250ms-blue)](https://rubix.net)
 
 </div>
 
 ---
+
+## Why Rubix
+
+Most blockchains would make on-chain agent accountability impractical. Ethereum charges gas on every write. Solana's throughput comes at the cost of centralization. Neither was designed for the AI economy.
+
+Rubix is different in ways that matter here:
+
+| Property | Rubix | Why it matters |
+|---|---|---|
+| Gas fees | **Zero, permanently** | An agent committing 1 000+ batches/day pays nothing |
+| Finality | **~250ms** | Faster than a stock exchange confirmation |
+| Throughput | **253.5M TPS** (network-wide parallel) | Thousands of agents commit simultaneously without queuing |
+| Consensus | **Proof-of-Pledge** | Participation-weighted quorum; no miner advantages or stake bias |
+| Identity | **DID native at Layer 1** | Each agent has a cryptographic identity, not just a wallet address |
+| Contract runtime | **Wasmtime (Rust/Go/C++)** | No Solidity or EVM constraints |
+| Carbon footprint | **Net zero** | Nodes run on consumer hardware with zero incremental energy per transaction |
+
+> *"The Trust Layer for Agentic AI and Digital Assets — a sovereign system of immutable graphs enabling trusted and programmable value exchange for the AI economy."*
+> — Rubix
+
+The parallel proofchain architecture is the key differentiator: each transaction commits to its own block independently, with no global queue. Multiple agents submitting simultaneously never block or delay each other.
+
+---
+
+## Contracts
+
+| Contract | Purpose | Status | Path |
+|---|---|---|---|
+| [agent_staking](#agent_staking) | Cryptographic accountability for AI trading agents | Live | [`agent_staking/`](./agent_staking) |
+
+---
+
+<br>
+
+# agent_staking
+
+[![Built with Rust](https://img.shields.io/badge/Contract-Rust_%2B_WASM-orange?logo=rust)](agent_staking/src/lib.rs)
+
+**Every trade. Every signal. Every decision. Permanently on-chain.**
 
 ## Accountability in algorithmic trading
 
@@ -30,29 +66,6 @@ This is a structural problem. Centralised record-keeping and genuine financial a
 Every activity batch a Fexr trading agent commits is hashed and written to the Rubix blockchain through this contract. The hash is permanent. The timestamp is immutable. The reputation score is computed by the contract itself, with no involvement from any server we control.
 
 Anyone with the contract address can independently verify what an agent did, when it did it, and how consistently it has been operating, back to the moment it was registered. The record cannot be altered after the fact and does not require trusting Fexr.
-
----
-
-## Why Rubix
-
-Most blockchains would make this impractical. Ethereum charges gas on every write. Solana's throughput comes at the cost of centralization. Neither was designed for the AI economy.
-
-Rubix is different in ways that matter here:
-
-| Property | Rubix | Why it matters for trading agents |
-|---|---|---|
-| Gas fees | **Zero, permanently** | An agent committing 1 000+ batches/day pays nothing |
-| Finality | **~250ms** | Faster than a stock exchange confirmation |
-| Throughput | **253.5M TPS** (network-wide parallel) | Thousands of agents commit simultaneously without queuing |
-| Consensus | **Proof-of-Pledge** | Participation-weighted quorum; no miner advantages or stake bias |
-| Identity | **DID native at Layer 1** | Each agent has a cryptographic identity, not just a wallet address |
-| Contract runtime | **Wasmtime (Rust/Go/C++)** | Wasmtime runtime; no Solidity or EVM constraints |
-| Carbon footprint | **Net zero** | Nodes run on consumer hardware with zero incremental energy per transaction |
-
-> *"The Trust Layer for Agentic AI and Digital Assets — a sovereign system of immutable graphs enabling trusted and programmable value exchange for the AI economy."*
-> — Rubix
-
-The parallel proofchain architecture is the key differentiator: each transaction commits to its own block independently, with no global queue. Multiple agents submitting simultaneously never block or delay each other.
 
 ---
 
@@ -358,7 +371,7 @@ Full runbook: **[VM1_SETUP.md](./VM1_SETUP.md)**
 
 ```bash
 # Clone
-git clone https://gitlab.com/fexr.club/dev/rubix-contracts.git
+git clone https://github.com/getfexr/rubix-contracts.git
 cd rubix-contracts
 
 # Deploy contract + register agent (runs on VM1 after node is live)
@@ -416,20 +429,6 @@ parent/
 
 ---
 
-## Quorum node setup
-
-See **[scripts/QUORUM_SETUP.md](./scripts/QUORUM_SETUP.md)** for the full explanation of why we run public validators and how quorum setup works.
-
-```bash
-# One-time: register quorum validator DIDs and broadcast to the network
-RUBIX_NODE_URL=http://localhost:<PORT> \
-PRIV_PWD=<password> \
-QUORUM_PWD=<password> \
-python3 scripts/setup_quorum_dids.py
-```
-
----
-
 ## Environment variables
 
 <details>
@@ -469,6 +468,20 @@ python3 scripts/setup_quorum_dids.py
 | `RUBIX_NODE_URL` | `http://<VM1-IP>:20000` |
 
 </details>
+
+---
+
+## Quorum node setup
+
+See **[scripts/QUORUM_SETUP.md](./scripts/QUORUM_SETUP.md)** for the full explanation of why we run public validators and how quorum setup works.
+
+```bash
+# One-time: register quorum validator DIDs and broadcast to the network
+RUBIX_NODE_URL=http://localhost:<PORT> \
+PRIV_PWD=<password> \
+QUORUM_PWD=<password> \
+python3 scripts/setup_quorum_dids.py
+```
 
 ---
 
