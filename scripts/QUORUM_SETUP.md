@@ -1,61 +1,59 @@
-# Quorum DID Setup
+# Quorum Node Setup
 
-## Why this exists
+## Why we run public validators
 
-Rubix QuorumType 1 (public pool) selects quorum validators by matching the **last hex character of the transaction ID** against the **last hex character of each candidate DID's multihash digest**.
+Every transaction on the Rubix network achieves finality through a quorum of independent validator nodes. When a Fexr trading agent submits an activity batch, that batch is not confirmed by Fexr's infrastructure alone; it is validated by a set of network peers who have no relationship to us and no interest in the outcome.
 
-Transaction IDs are SHA3-256 hashes — their last character is uniformly random across all 16 hex values (`0`–`9`, `a`–`f`). If your quorum node only has one DID, it only gets selected for ~1/16 of all public transactions. To be selected for every transaction, your node needs one DID for each of the 16 possible last hex characters.
+Running quorum validators is how we participate in that infrastructure as a first-class network member rather than a passive consumer of it. Our validators are registered on the public Rubix network and are eligible to validate any transaction from any node. When we pledge RBT to validate a transaction, we are economically accountable for correct behaviour. Validators that fail to perform are excluded from future selection.
 
-This is how your node maximises the number of consensus rounds it participates in, which is directly how credits are earned.
+This is the trust guarantee: the on-chain record of an agent's activity exists because independent network participants confirmed it, not because Fexr wrote it.
 
-## How credits work
+---
 
-Credits are the quorum node's participation record. For every consensus round a quorum node validates:
+## How QuorumType 1 validator selection works
 
-1. The node pledges some of its RBT tokens for the duration of the transaction
-2. After 7 days, those tokens are unpledged and returned
-3. A credit entry is stored against the quorum node's DID
-
-Credit score = number of credit entries. More transactions validated = more credits.
-
-Credits come from two sources:
-
-- **Your own transactions** — your agent commits activity batches to the agent_staking smart contract. Your quorum node validates every one of these (via QuorumType 2, which routes directly to your node regardless of DID suffix).
-- **External network transactions** — every other Rubix node doing QuorumType 1 transactions will select your quorum node when the transaction ID's last char matches one of your registered DIDs. With 16 DIDs covering all hex chars, you are always in the candidate pool.
-
-The 16-DID setup only affects external traffic. Your own agent transactions are already fully captured via QuorumType 2.
-
-## How DID selection works (QuorumType 1)
-
-When a Rubix node initiates a QuorumType 1 transaction:
+When a Rubix node initiates a public (QuorumType 1) transaction, it selects validators as follows:
 
 1. It computes `lastChar = hex(SHA3-256(contractBlock))[-1]`
 2. It queries its local `DIDPeerTable` for all entries where `did_last_char = lastChar`
-3. It picks the first 7 results as the quorum
+3. It selects the first 7 results as the quorum for that transaction
 
-The `did_last_char` stored in the table is computed as:
+The `did_last_char` value is derived as:
+
 ```
 lastChar = hex(CID.multihash_bytes)[-1]
 ```
 
-This is not the last character of the DID string itself — it is the last hex nibble of the raw multihash bytes inside the CID. You cannot choose this value when creating a DID; it is determined by the hash of the public key. You must generate DIDs until you happen to get one for each of the 16 possible values.
+This is not the last character of the DID string itself. It is the last hex nibble of the raw multihash bytes inside the CID, determined by the hash of the public key at DID creation time. The value cannot be predicted or chosen in advance; DIDs must be generated until one with each of the 16 possible values is obtained.
 
-When you call `registerdid`, your DID is broadcast via pubsub to every node on the Rubix network. Each node adds it to its local `DIDPeerTable`. From that point on, any node doing a QuorumType 1 transaction whose last char matches yours will include your node as a quorum candidate.
+When `registerdid` is called, the DID is broadcast via pubsub to every node on the Rubix network. Each node adds it to its local `DIDPeerTable`. From that point forward, any public transaction whose last hex character matches a registered DID will include this node as a validator candidate.
+
+---
+
+## The 16-DID requirement
+
+Transaction IDs are SHA3-256 hashes. Their last hex character is uniformly distributed across all 16 values (0 through f). A node with a single DID is eligible to validate approximately 1 in 16 public transactions. A node with one DID for each of the 16 possible suffix values is eligible to validate any public transaction on the network.
+
+The 16-DID configuration is the minimum needed for full participation in the public validator pool.
+
+---
 
 ## What the script does
 
-`setup_quorum_dids.py` automates the following loop:
+`setup_quorum_dids.py` automates the registration process:
 
-1. `POST /api/createdid` — creates a new LiteDID (type 4, secp256k1) on the quorum node
+1. `POST /api/createdid`: creates a new LiteDID (type 4, secp256k1) on the node
 2. Computes the DID's last hex char using the same logic as the Go node
-3. If this hex char is not yet covered, keeps the DID; otherwise discards it
-4. For each keeper DID:
-   - `POST /api/setup-quorum` — enables the DID to co-sign as a quorum member
-   - `POST /api/register-did` — broadcasts the DID to the entire network via pubsub
-5. Stops when all 16 hex chars are covered
-6. Writes `quorumlist.json` for use with the `addquorum` command on the initiating node
+3. Retains the DID if its suffix value is not yet covered; discards it otherwise
+4. For each retained DID:
+   - `POST /api/setup-quorum`: enables the DID to co-sign as a quorum member
+   - `POST /api/register-did`: broadcasts the DID to the network via pubsub
+5. Stops when all 16 suffix values are covered
+6. Writes `quorumlist.json` for use with the `addquorum` command
 
-By the coupon collector's problem, covering all 16 chars requires generating an expected ~54 DIDs. The script caps at 200 attempts.
+By the coupon collector's problem, covering all 16 values requires generating an expected ~54 DIDs. The script caps at 200 attempts.
+
+---
 
 ## Usage
 
@@ -66,15 +64,17 @@ QUORUM_PWD=mypassword \
 python3 scripts/setup_quorum_dids.py
 ```
 
-This is a one-time operation. Run it once when setting up the quorum node.
+This is a one-time operation per node.
+
+---
 
 ## After running
 
 **1. Fund the quorum node with RBT**
 
-The quorum node pledges its own RBT tokens to validate each transaction. Without a balance it cannot participate. Transfer enough RBT to cover concurrent pledge obligations — each transaction requires a pledge proportional to the smart contract's deployed value (1 RBT for agent_staking).
+The quorum node pledges its own RBT tokens during each validation round. Without sufficient balance it cannot participate. Transfer enough RBT to cover concurrent pledge obligations; each transaction requires a pledge proportional to the smart contract's deployed value (1 RBT for agent_staking).
 
-**2. Add the quorum list to the initiating node**
+**2. Register the quorum list with the initiating node**
 
 ```bash
 ./rubixgoplatform addquorum \
@@ -83,19 +83,19 @@ The quorum node pledges its own RBT tokens to validate each transaction. Without
   -grpcPort 10500
 ```
 
-This tells the initiating node to use your quorum DIDs for QuorumType 2 transactions. Keep `quorumType` as `2` — this gives guaranteed routing to your node for all of your agent's own transactions.
-
 **3. Verify**
 
 ```bash
 ./rubixgoplatform getallquorum -port 20000 -grpcPort 10500
 ```
 
-Should list the 16 DIDs you registered.
+Should list 16 DIDs.
+
+---
 
 ## Quorum type summary
 
-| Transaction source | quorumType | How your node gets selected |
+| Transaction type | quorumType | Validator selection |
 |---|---|---|
-| Agent batches | 2 (private) | Always — you are explicitly in the quorum list |
-| Rest of Rubix network | 1 (public) | When last char of txn ID matches one of your 16 DIDs |
+| Agent activity batches | 2 (configured list) | Validators from the pre-registered quorum list |
+| Public network transactions | 1 (public pool) | Node selected when transaction ID suffix matches a registered DID |

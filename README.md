@@ -4,7 +4,7 @@
 
 ### Every trade. Every signal. Every decision. Permanently on-chain.
 
-AI trading agents with cryptographic accountability — powered by Rubix, the zero-gas, 250ms-finality blockchain purpose-built for the AI economy.
+AI trading agents with cryptographic accountability, powered by Rubix, the zero-gas, 250ms-finality blockchain purpose-built for the AI economy.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Contract-Rust_%2B_WASM-orange?logo=rust)](agent_staking/src/lib.rs)
@@ -17,23 +17,19 @@ AI trading agents with cryptographic accountability — powered by Rubix, the ze
 
 ---
 
-## The problem with AI trading agents
+## Accountability in algorithmic trading
 
-Algorithmic trading is a black box. An agent makes thousands of decisions a day — buy signals, position sizing, execution timing — and the only record is a centralized dashboard that anyone with database access can edit.
+Automated trading systems produce no independently verifiable record of their activity. An agent's decisions are captured in infrastructure the operator controls, and audit trails are internal documents that require no external validation to compile. When a system reports that it executed a particular strategy over a given period, the evidence for that claim is the same database the operator writes to. Track records are self-reported. The practical standard for proving what an automated system actually did amounts to a log file that anyone with sufficient access can modify.
 
-Clients trust a number on a screen. Auditors trust a log file. Regulators trust a PDF.
-
-None of it is verifiable.
+This is a structural problem. Centralised record-keeping and genuine financial accountability are difficult to reconcile.
 
 ---
 
 ## The Fexr approach
 
-Every activity batch a Fexr trading agent commits is hashed and written to the Rubix blockchain through this contract. The hash is permanent. The timestamp is immutable. The reputation score is computed by the contract itself — not by any server we control.
+Every activity batch a Fexr trading agent commits is hashed and written to the Rubix blockchain through this contract. The hash is permanent. The timestamp is immutable. The reputation score is computed by the contract itself, with no involvement from any server we control.
 
-Anyone with the contract address can independently verify what an agent did, when it did it, and how consistently it has been operating — going back to the moment it was registered.
-
-No dashboard. No trust required.
+Anyone with the contract address can independently verify what an agent did, when it did it, and how consistently it has been operating, back to the moment it was registered. The record cannot be altered after the fact and does not require trusting Fexr.
 
 ---
 
@@ -48,10 +44,10 @@ Rubix is different in ways that matter here:
 | Gas fees | **Zero, permanently** | An agent committing 1 000+ batches/day pays nothing |
 | Finality | **~250ms** | Faster than a stock exchange confirmation |
 | Throughput | **253.5M TPS** (network-wide parallel) | Thousands of agents commit simultaneously without queuing |
-| Consensus | **Proof-of-Pledge** | Credit-based quorum — no miner advantages, no stake bias |
+| Consensus | **Proof-of-Pledge** | Participation-weighted quorum; no miner advantages or stake bias |
 | Identity | **DID native at Layer 1** | Each agent has a cryptographic identity, not just a wallet address |
-| Contract runtime | **Wasmtime (Rust/Go/C++)** | No Solidity, no EVM — battle-tested WASM runtime used by Fastly |
-| Carbon footprint | **Net zero** | Nodes run on laptops — zero incremental energy per transaction |
+| Contract runtime | **Wasmtime (Rust/Go/C++)** | Wasmtime runtime; no Solidity or EVM constraints |
+| Carbon footprint | **Net zero** | Nodes run on consumer hardware with zero incremental energy per transaction |
 
 > *"The Trust Layer for Agentic AI and Digital Assets — a sovereign system of immutable graphs enabling trusted and programmable value exchange for the AI economy."*
 > — Rubix
@@ -93,8 +89,8 @@ flowchart LR
 
 **The storage split is intentional:**
 
-- **Batch hash + metadata** → WASM state on-chain — permanently public, tamper-proof
-- **Full batch JSON** → dapp SQLite — queryable, auditable, kept off the ledger to stay lean
+- **Batch hash + metadata** are stored in WASM state on-chain, permanently public and tamper-proof
+- **Full batch JSON** is stored in the dapp's SQLite, queryable and auditable, kept off the ledger to bound state size
 - **Integrity proof**: anyone can re-hash a SQLite record and compare it against the on-chain hash
 
 ---
@@ -139,7 +135,7 @@ All calls use `/api/execute-smart-contract` with `smartContractData`:
 
 ### `register_agent`
 
-Called once at deploy time. Sets the agent DID as the permanent contract owner. All future writes must originate from this identity. Idempotent — safe to re-call.
+Called once at deploy time. Sets the agent DID as the permanent contract owner. All future writes must originate from this identity. Idempotent; safe to re-call.
 
 ```json
 {
@@ -176,7 +172,7 @@ The primary write path. Commits an entire batch of agent activities in a single 
 }
 ```
 
-`batch_hash` is `SHA-256(full_batch_json)`, computed by the caller before submission. The contract stores it verbatim — any third party can independently re-hash the SQLite record to verify it matches what is on-chain.
+`batch_hash` is `SHA-256(full_batch_json)`, computed by the caller before submission. The contract stores it verbatim. Any third party can independently re-hash the SQLite record to verify it matches what is on-chain.
 
 **Response:**
 ```json
@@ -289,7 +285,7 @@ graph TD
     roots -. "hash links to" .-> batches
 ```
 
-Batch roots beyond 500 roll off WASM state but remain permanently in SQLite. The hash is the proof — any auditor can verify a stored record against its on-chain commitment.
+Batch roots beyond 500 roll off WASM state but remain permanently in SQLite. The hash is the proof; any auditor can verify a stored record against its on-chain commitment.
 
 ---
 
@@ -308,13 +304,13 @@ score = velocity(30) + volume(40) + recency(20) + tenure(10)
 | **Recency** | 20 pts | `exp(−days_idle × 0.231) × 20` | Half-life: 3 days idle |
 | **Tenure** | 10 pts | `min(age_days ÷ 30, 1) × 10` | 30 days registered |
 
-A brand-new agent scores ~10. A consistently active agent operating for 30+ days with 10 000+ total actions scores near 100. The score reflects actual on-chain history — it cannot be self-reported.
+A brand-new agent scores ~10. A consistently active agent operating for 30+ days with 10 000+ total actions scores near 100. The score reflects actual on-chain history and cannot be self-reported.
 
 ---
 
 ## Dapp query API
 
-Read-only endpoints for querying activity history directly from SQLite. No consensus round — instant reads.
+Read-only endpoints for querying activity history directly from SQLite. No consensus round; these are instant reads against the local database.
 
 ```
 Base URL: http://<VM1-IP>:6001
@@ -342,7 +338,7 @@ GET /activities?from_ts=1700000000000&to_ts=1700003600000&limit=100
 
 ### `GET /batch/{hash}`
 
-Returns the full JSON payload of a batch by its SHA-256 hash — the same hash committed on-chain.
+Returns the full JSON payload of a batch by its SHA-256 hash, the same hash committed on-chain.
 
 ```bash
 curl http://<VM1-IP>:6001/batch/e3b0c44298fc1c149afb4c8996fb92427ae41e4649b934ca495991b7852b855
@@ -374,7 +370,7 @@ AGENT_TYPE=trading \
 PASSPHRASE=<password> \
 python3 scripts/deploy_agent_staking.py
 
-# Start the dapp — Docker handles all Go dependencies automatically
+# Start the dapp (Docker handles all Go dependencies at build time)
 RUBIX_NODE_URL=http://localhost:<PORT> docker compose up -d --build
 
 # Register the callback URL so the node calls the dapp on every execution
@@ -384,13 +380,13 @@ curl -X POST http://localhost:<PORT>/api/register-callback-url \
 ```
 
 > [!IMPORTANT]
-> `AGENT_DID` must be the executor DID whose private key your service holds — not the deployer DID. The contract stores this as its permanent owner and hard-rejects any batch signed by a different DID.
+> `AGENT_DID` must be the executor DID whose private key your service holds, not the deployer DID. The contract stores this as its permanent owner and hard-rejects any batch signed by a different DID.
 
 ---
 
 ## Building from source
 
-The pre-built WASM binary at `artifacts/agent_staking.wasm` is committed — deploy without a Rust toolchain.
+The pre-built WASM binary at `artifacts/agent_staking.wasm` is committed to this repo; no Rust toolchain is required to deploy.
 
 To rebuild after modifying the contract:
 
@@ -478,7 +474,7 @@ python3 scripts/setup_quorum_dids.py
 
 <div align="center">
 
-Built on [Rubix](https://rubix.net) — *The Trust Layer for Agentic AI and Digital Assets*
+Built on [Rubix](https://rubix.net) · *The Trust Layer for Agentic AI and Digital Assets*
 
 [getfexr.com](https://getfexr.com)
 
