@@ -25,6 +25,11 @@ import requests
 NODE_URL = os.getenv("RUBIX_NODE_URL", "http://localhost:20011")
 DEPLOYER_DID = os.getenv("DEPLOYER_DID", "")
 PASSPHRASE = os.getenv("PASSPHRASE", "mypassword")
+# AGENT_DID: the DID that will own the contract state and send all future batches.
+# This is fexrapi's AGENT_STAKING_EXECUTOR_DID — the one whose private key hex
+# fexrapi holds. Defaults to DEPLOYER_DID only if not set, which is wrong for
+# production (deployer and executor are always different DIDs).
+AGENT_DID = os.getenv("AGENT_DID", "") or DEPLOYER_DID
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WASM_FILE = os.path.join(REPO_ROOT, "artifacts", "agent_staking.wasm")
@@ -113,15 +118,23 @@ def submit_signature(request_id: str) -> dict:
     return resp.json()
 
 
-def register_agent(deployer_did: str, contract_address: str) -> None:
-    """Execute the contract to call register_agent for the deployer."""
-    print("  Registering deployer as first agent...")
+def register_agent(deployer_did: str, contract_address: str, agent_did: str) -> None:
+    """
+    Initialise the WASM contract state by registering the agent DID.
+
+    deployer_did: signs the transaction (has a node-side key, uses mode-0 signing).
+    agent_did:    the DID registered inside the WASM as the contract owner.
+                  Must match AGENT_STAKING_EXECUTOR_DID on fexrapi — every future
+                  record_activity_batch call checks state.agent_did == req.agent_did.
+    """
+    print(f"  Registering agent {agent_did}...")
     sc_data = json.dumps({
-        "register_agent": {
-            "agent_did": deployer_did,
-            "agent_name": "deployer",
-            "agent_type": "general",
-            "timestamp": int(time.time()),
+        "function": "register_agent",
+        "params": {
+            "agent_did": agent_did,
+            "agent_name": "unit1440",
+            "agent_type": "trading",
+            "timestamp": int(time.time() * 1000),
         }
     })
     payload = {
@@ -129,7 +142,7 @@ def register_agent(deployer_did: str, contract_address: str) -> None:
         "smartContractToken": contract_address,
         "smartContractData": sc_data,
         "quorumType": 2,
-        "comment": "register deployer agent",
+        "comment": "register agent",
     }
     resp = requests.post(
         f"{NODE_URL}/api/execute-smart-contract",
@@ -153,6 +166,7 @@ def main():
     print(f"=== Deploying agent_staking contract ===")
     print(f"  Node    : {NODE_URL}")
     print(f"  Deployer: {DEPLOYER_DID}")
+    print(f"  Agent   : {AGENT_DID}")
     print(f"  WASM    : {WASM_FILE}")
     print()
 
@@ -170,17 +184,23 @@ def main():
             sys.exit(1)
     print("  Deploy committed.")
 
-    # Step 3: execute register_agent to initialise state
-    register_agent(DEPLOYER_DID, contract_address)
+    # Step 3: execute register_agent to initialise state.
+    # DEPLOYER_DID signs (it has a node-side key for mode-0 signing).
+    # AGENT_DID is the identity registered in the WASM contract — must match
+    # what fexrapi sends in every future record_activity_batch call.
+    register_agent(DEPLOYER_DID, contract_address, AGENT_DID)
 
     print()
     print("✓ Deployment complete!")
     print(f"  Contract address : {contract_address}")
     print(f"  Deployer DID     : {DEPLOYER_DID}")
+    print(f"  Agent DID        : {AGENT_DID}")
     print()
-    print("Add to fexrapi .env:")
+    print("Add to fexrapi + unit1440 .env on VM2:")
     print(f"  AGENT_STAKING_CONTRACT_ADDRESS={contract_address}")
-    print(f"  AGENT_STAKING_DEPLOYER_DID={DEPLOYER_DID}")
+    print(f"  AGENT_STAKING_EXECUTOR_DID={AGENT_DID}")
+    print(f"  RUBIX_CONTRACT_ADDRESS={contract_address}")
+    print(f"  RUBIX_AGENT_DID={AGENT_DID}")
 
 
 if __name__ == "__main__":
