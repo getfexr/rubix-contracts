@@ -418,10 +418,10 @@ parent/
 
 ## Quorum node setup
 
-See **[scripts/QUORUM_SETUP.md](./scripts/QUORUM_SETUP.md)** for a full explanation of Rubix's QuorumType 1 DID selection and the 16-DID coverage strategy.
+See **[scripts/QUORUM_SETUP.md](./scripts/QUORUM_SETUP.md)** for the full explanation of why we run public validators and how quorum setup works.
 
 ```bash
-# One-time: register one quorum DID per hex suffix (0–f)
+# One-time: register quorum validator DIDs and broadcast to the network
 RUBIX_NODE_URL=http://localhost:<PORT> \
 PRIV_PWD=<password> \
 QUORUM_PWD=<password> \

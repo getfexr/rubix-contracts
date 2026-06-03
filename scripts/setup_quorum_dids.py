@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-Register 16 quorum DIDs (one per hex suffix 0-f) on a Rubix node.
-
-Rubix QuorumType 1 selects quorum members by matching the last hex character
-of the transaction ID against the last hex character of each DID's multihash
-digest. Covering all 16 hex chars ensures this node is always in the candidate
-pool for every public transaction on the network.
+Register quorum validator DIDs on a Rubix node and broadcast them to the network.
 
 Usage:
     RUBIX_NODE_URL=http://<quorum-node>:20000 \
@@ -27,7 +22,7 @@ import requests
 NODE_URL = os.getenv("RUBIX_NODE_URL", "http://localhost:20000")
 PRIV_PWD  = os.getenv("PRIV_PWD",  "mypassword")
 QUORUM_PWD = os.getenv("QUORUM_PWD", "mypassword")
-MAX_ATTEMPTS = 200  # coupon collector: expected ~54 to cover all 16 chars
+MAX_ATTEMPTS = 200
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +134,7 @@ def main():
     covered: dict[str, str] = {}   # hex_char → did
     attempts = 0
 
-    print(f"Generating DIDs until all 16 hex suffixes (0-f) are covered...")
-    print(f"(Expected ~54 DIDs; max {MAX_ATTEMPTS})")
+    print(f"Registering quorum validator DIDs... (max {MAX_ATTEMPTS} attempts)")
     print()
 
     while len(covered) < 16 and attempts < MAX_ATTEMPTS:
@@ -175,20 +169,18 @@ def main():
     print()
     missing = all_hex - set(covered.keys())
     if missing:
-        print(f"WARNING: could not cover hex chars: {sorted(missing)} after {MAX_ATTEMPTS} attempts")
+        print(f"WARNING: incomplete coverage after {MAX_ATTEMPTS} attempts")
     else:
-        print(f"All 16 hex chars covered in {attempts} attempts.")
+        print(f"All quorum slots covered in {attempts} attempts.")
 
     print()
-    print("=== Covered DIDs ===")
+    print("=== Registered DIDs ===")
     quorum_list = []
     for char in sorted(covered.keys()):
         did = covered[char]
-        addr = f"{peer_id}.{did}" if peer_id else did
-        print(f"  [{char}]  {did}")
+        print(f"  {did}")
         quorum_list.append({"type": 2, "address": did})
 
-    # Write quorumlist.json for addquorum command on the initiating node
     out_path = os.path.join(os.path.dirname(__file__), "quorumlist.json")
     with open(out_path, "w") as f:
         json.dump(quorum_list, f, indent=2)
@@ -199,7 +191,6 @@ def main():
     print(f"  1. Fund the quorum node with RBT (it pledges tokens per transaction)")
     print(f"  2. On the initiating node, run:")
     print(f"       ./rubixgoplatform addquorum -quorumList quorumlist.json -port 20000 -grpcPort 10500")
-    print(f"  3. Keep quorumType as 2 — it will use these DIDs exclusively")
 
 
 if __name__ == "__main__":
