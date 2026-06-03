@@ -72,7 +72,7 @@ pub struct RegisterAgentReq {
     pub timestamp: u64,
 }
 
-/// Batch commit request — primary write path for unit1440 ActivityCommitter.
+/// Batch commit request — primary write path for the agent activity committer.
 /// The full batch JSON is stored in dapp SQLite via append_batch_to_storage;
 /// only the hash + metadata enter WASM state.
 #[derive(Serialize, Deserialize)]

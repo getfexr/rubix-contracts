@@ -95,10 +95,10 @@ Note the DID printed — it starts with `bafybmi`. Call it `DEPLOYER_DID`.
 
 ---
 
-## 4. Generate the executor key pair (fexrapi uses this for ongoing signing)
+## 4. Generate the executor key pair (executor service uses this for ongoing signing)
 
-The executor DID is used by fexrapi on VM2 to sign every smart contract
-execution. Its private key must never be on the Rubix node — fexrapi signs
+The executor DID is used by the executor service on VM2 to sign every smart contract
+execution. Its private key must never be on the Rubix node — the executor service signs
 the hash directly (mode 4 / LiteDID). Generate a fresh secp256k1 key pair:
 
 ```bash
@@ -133,7 +133,7 @@ curl -s -X POST http://localhost:$NODE_PORT/api/request-did-for-pubkey \
 Note the `did` field in the response — call it `EXECUTOR_DID`.
 
 This DID is what the WASM contract stores as its "owner". It must match
-`AGENT_STAKING_EXECUTOR_DID` in fexrapi's `.env` — every future
+`AGENT_STAKING_EXECUTOR_DID` in your executor service `.env` — every future
 `record_activity_batch` call is validated against it.
 
 ---
@@ -144,7 +144,7 @@ The deployer DID needs ≥ 1 RBT to lock in the contract genesis block plus
 gas for the deploy consensus round.
 
 The executor DID needs enough RBT to cover concurrent pledge obligations.
-Each unit1440 batch execution pledges `contract_value / 5 = 0.2 RBT` per
+Each agent batch execution pledges `contract_value / 5 = 0.2 RBT` per
 quorum member per transaction, locked for 7 days before returning. At one
 batch per 5 minutes, steady-state locked RBT ≈ 2016 × 0.2 = ~400 RBT across
 the quorum pool. Fund conservatively — start with at least 50 RBT on the
@@ -177,7 +177,7 @@ This script:
 3. Calls `register_agent` to initialise on-chain state with `AGENT_DID`
 4. Prints the contract address (a `Qm...` IPFS CID)
 
-**Save the contract address** — it goes into fexrapi and unit1440 env vars on VM2.
+**Save the contract address** — it goes into your executor service and agent service env vars on VM2.
 
 ---
 
@@ -215,7 +215,7 @@ curl -s -X POST http://localhost:$NODE_PORT/api/register-callback-url \
 
 ## 10. Open port 6001 to VM2
 
-fexrapi on VM2 reads activity history and state from the dapp directly.
+The executor service on VM2 reads activity history and state from the dapp directly.
 Allow inbound TCP 6001 from VM2's IP:
 
 ```bash
@@ -281,21 +281,20 @@ Once all the above is complete, share the following with whoever manages
 the VM2 `.env` files:
 
 ```
-# fexrapi .env
+# executor service .env
 AGENT_STAKING_CONTRACT_ADDRESS=<Qm... from step 7>
 AGENT_STAKING_EXECUTOR_DID=<EXECUTOR_DID from step 5>
 AGENT_STAKING_PRIVATE_KEY_HEX=<64-char hex from step 4>
 AGENT_STAKING_DAPP_URL=http://<VM1_IP>:6001
 RUBIX_NODE_URL=http://<VM1_IP>:$NODE_PORT
 
-# unit1440 .env
+# agent service .env
 RUBIX_CONTRACT_ADDRESS=<same contract address>
 RUBIX_AGENT_DID=<same EXECUTOR_DID>
-UNIT1440_INSTANCE_ID=prod
 ```
 
 No rebuilds needed on VM2 — env var changes alone activate everything.
-Restart fexrapi and unit1440 containers after updating `.env`.
+Restart your services after updating `.env`.
 
 ---
 

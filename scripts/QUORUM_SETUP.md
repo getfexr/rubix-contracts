@@ -20,10 +20,10 @@ Credit score = number of credit entries. More transactions validated = more cred
 
 Credits come from two sources:
 
-- **Your own transactions** — unit1440 commits activity batches to the agent_staking smart contract. Your quorum node validates every one of these (via QuorumType 2, which routes directly to your node regardless of DID suffix).
+- **Your own transactions** — your agent commits activity batches to the agent_staking smart contract. Your quorum node validates every one of these (via QuorumType 2, which routes directly to your node regardless of DID suffix).
 - **External network transactions** — every other Rubix node doing QuorumType 1 transactions will select your quorum node when the transaction ID's last char matches one of your registered DIDs. With 16 DIDs covering all hex chars, you are always in the candidate pool.
 
-The 16-DID setup only affects external traffic. Your own unit1440 transactions are already fully captured via QuorumType 2.
+The 16-DID setup only affects external traffic. Your own agent transactions are already fully captured via QuorumType 2.
 
 ## How DID selection works (QuorumType 1)
 
@@ -53,7 +53,7 @@ When you call `registerdid`, your DID is broadcast via pubsub to every node on t
    - `POST /api/setup-quorum` — enables the DID to co-sign as a quorum member
    - `POST /api/register-did` — broadcasts the DID to the entire network via pubsub
 5. Stops when all 16 hex chars are covered
-6. Writes `quorumlist.json` for use with the `addquorum` command on the unit1440 node
+6. Writes `quorumlist.json` for use with the `addquorum` command on the initiating node
 
 By the coupon collector's problem, covering all 16 chars requires generating an expected ~54 DIDs. The script caps at 200 attempts.
 
@@ -74,7 +74,7 @@ This is a one-time operation. Run it once when setting up the quorum node.
 
 The quorum node pledges its own RBT tokens to validate each transaction. Without a balance it cannot participate. Transfer enough RBT to cover concurrent pledge obligations — each transaction requires a pledge proportional to the smart contract's deployed value (1 RBT for agent_staking).
 
-**2. Add the quorum list to the unit1440 initiating node**
+**2. Add the quorum list to the initiating node**
 
 ```bash
 ./rubixgoplatform addquorum \
@@ -83,7 +83,7 @@ The quorum node pledges its own RBT tokens to validate each transaction. Without
   -grpcPort 10500
 ```
 
-This tells the unit1440 node to use your quorum DIDs for QuorumType 2 transactions. unit1440's `quorumType` stays as `2` — this gives guaranteed routing to your node for all of unit1440's own transactions.
+This tells the initiating node to use your quorum DIDs for QuorumType 2 transactions. Keep `quorumType` as `2` — this gives guaranteed routing to your node for all of your agent's own transactions.
 
 **3. Verify**
 
@@ -97,5 +97,5 @@ Should list the 16 DIDs you registered.
 
 | Transaction source | quorumType | How your node gets selected |
 |---|---|---|
-| unit1440 batches | 2 (private) | Always — you are explicitly in the quorum list |
+| Agent batches | 2 (private) | Always — you are explicitly in the quorum list |
 | Rest of Rubix network | 1 (public) | When last char of txn ID matches one of your 16 DIDs |

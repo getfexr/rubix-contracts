@@ -13,7 +13,7 @@ Usage:
     QUORUM_PWD=mypassword \
     python3 setup_quorum_dids.py
 
-Outputs a quorumlist.json you can pass to unit1440's addquorum command.
+Outputs a quorumlist.json you can pass to the addquorum command on the initiating node.
 """
 
 import base64
@@ -197,9 +197,9 @@ def main():
     print()
     print("Next steps:")
     print(f"  1. Fund the quorum node with RBT (it pledges tokens per transaction)")
-    print(f"  2. On the unit1440 initiating node, run:")
+    print(f"  2. On the initiating node, run:")
     print(f"       ./rubixgoplatform addquorum -quorumList quorumlist.json -port 20000 -grpcPort 10500")
-    print(f"  3. unit1440's quorumType stays 2 — it will use these DIDs exclusively")
+    print(f"  3. Keep quorumType as 2 — it will use these DIDs exclusively")
 
 
 if __name__ == "__main__":

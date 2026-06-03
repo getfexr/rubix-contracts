@@ -17,8 +17,8 @@ Contracts are written in Rust, compiled to WASM, and executed on the Rubix block
 ## Architecture
 
 ```
-VM1 (Rubix VM)                         VM2 (API VM)
-├── rubixgoplatform (node :20011)        └── fexrapi
+VM1 (Rubix VM)                         VM2 (Executor VM)
+├── rubixgoplatform (node :20011)        └── executor service
 ├── artifacts/agent_staking.wasm              └── calls VM1:20011 for execute-smart-contract
 ├── agent_staking/dapp (Go, :6001)
 │    └── receives callbacks from node
@@ -27,8 +27,8 @@ VM1 (Rubix VM)                         VM2 (API VM)
 ```
 
 - The Rubix node and Go dapp live on the same VM — node callbacks to dapp are localhost-to-localhost
-- fexrapi on VM2 calls the Rubix node API directly; it never talks to the dapp
-- For other chains (Polygon, Solana): contract code lives with fexrapi on VM2, connects to external RPC nodes
+- The executor service on VM2 calls the Rubix node API directly; it never talks to the dapp
+- For other chains (Polygon, Solana): contract code lives with the executor service on VM2, connects to external RPC nodes
 
 ---
 
@@ -179,15 +179,15 @@ Verify with Rubix documentation if the endpoint or field names differ for your n
 
 ---
 
-## VM2 setup — API VM
+## VM2 setup — Executor VM
 
-No contract code or dapp runs here. fexrapi talks to the Rubix node on VM1 via HTTP.
+No contract code or dapp runs here. The executor service talks to the Rubix node on VM1 via HTTP.
 
-Add to fexrapi `.env`:
+Add to your executor service `.env`:
 ```env
 RUBIX_NODE_URL=http://<VM1-IP>:20011
 AGENT_STAKING_CONTRACT_ADDRESS=<from deploy step 5>
-AGENT_STAKING_DEPLOYER_DID=bafybmi...
+AGENT_STAKING_EXECUTOR_DID=<EXECUTOR_DID from deploy output>
 ```
 
 Ensure VM2 can reach VM1 on port `20011` (outbound). No inbound ports required on VM2 for Rubix.
@@ -209,12 +209,12 @@ DEPLOYER_DID=bafybmi... \
 PASSPHRASE=yourpassword \
 python3 scripts/deploy_agent_staking.py
 
-# 3. update AGENT_STAKING_CONTRACT_ADDRESS in fexrapi .env
+# 3. update AGENT_STAKING_CONTRACT_ADDRESS in your executor service .env
 # 4. re-register dapp URL (step 6 above)
 # 5. restart dapp (new WASM_PATH if changed)
 ```
 
-Each deploy produces a new contract address. The old contract and its state remain on-chain but fexrapi must be pointed to the new address.
+Each deploy produces a new contract address. The old contract and its state remain on-chain but your executor service must be pointed to the new address.
 
 ---
 
@@ -297,10 +297,10 @@ tail -f /path/to/rubix/node.log
 
 | Variable | Used by | Description |
 |---|---|---|
-| `RUBIX_NODE_URL` | dapp, deploy script, fexrapi | Rubix node API base URL. Default: `http://localhost:20011` |
+| `RUBIX_NODE_URL` | dapp, deploy script, executor service | Rubix node API base URL. Default: `http://localhost:20011` |
 | `DEPLOYER_DID` | deploy script | Rubix DID of the deployer. Must have ≥ 1 RBT. |
 | `PASSPHRASE` | deploy script | Password for the deployer DID (password-based signing). |
 | `WASM_PATH` | dapp | Absolute path to `agent_staking.wasm`. Default: `../../../artifacts/agent_staking.wasm` |
 | `DAPP_PORT` | dapp | Port the dapp listens on. Default: `:6001` |
-| `AGENT_STAKING_CONTRACT_ADDRESS` | fexrapi | Contract address returned by the deploy script. |
-| `AGENT_STAKING_DEPLOYER_DID` | fexrapi | Deployer DID, used as executor for contract calls. |
+| `AGENT_STAKING_CONTRACT_ADDRESS` | executor service | Contract address returned by the deploy script. |
+| `AGENT_STAKING_EXECUTOR_DID` | executor service | Executor DID, used to sign contract calls. |

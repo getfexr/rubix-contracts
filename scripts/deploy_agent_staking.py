@@ -12,7 +12,7 @@ The deployer DID must already exist on the node (created via /api/createdid
 or /api/request-did-for-pubkey). The DID must have at least 1 RBT balance.
 
 Prints the deployed contract address on success. Store it as
-AGENT_STAKING_CONTRACT_ADDRESS in fexrapi's .env.
+AGENT_STAKING_CONTRACT_ADDRESS in your executor service .env.
 """
 
 import json
@@ -26,9 +26,9 @@ NODE_URL = os.getenv("RUBIX_NODE_URL", "http://localhost:20011")
 DEPLOYER_DID = os.getenv("DEPLOYER_DID", "")
 PASSPHRASE = os.getenv("PASSPHRASE", "mypassword")
 # AGENT_DID: the DID that will own the contract state and send all future batches.
-# This is fexrapi's AGENT_STAKING_EXECUTOR_DID — the one whose private key hex
-# fexrapi holds. Defaults to DEPLOYER_DID only if not set, which is wrong for
-# production (deployer and executor are always different DIDs).
+# This is AGENT_STAKING_EXECUTOR_DID in the executor service — the one whose private
+# key hex the executor service holds. Defaults to DEPLOYER_DID only if not set, which
+# is wrong for production (deployer and executor are always different DIDs).
 AGENT_DID = os.getenv("AGENT_DID", "") or DEPLOYER_DID
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -124,16 +124,18 @@ def register_agent(deployer_did: str, contract_address: str, agent_did: str) -> 
 
     deployer_did: signs the transaction (has a node-side key, uses mode-0 signing).
     agent_did:    the DID registered inside the WASM as the contract owner.
-                  Must match AGENT_STAKING_EXECUTOR_DID on fexrapi — every future
-                  record_activity_batch call checks state.agent_did == req.agent_did.
+                  Must match AGENT_STAKING_EXECUTOR_DID in the executor service — every
+                  future record_activity_batch call checks state.agent_did == req.agent_did.
     """
     print(f"  Registering agent {agent_did}...")
+    agent_name = os.getenv("AGENT_NAME", "agent")
+    agent_type = os.getenv("AGENT_TYPE", "general")
     sc_data = json.dumps({
         "function": "register_agent",
         "params": {
             "agent_did": agent_did,
-            "agent_name": "unit1440",
-            "agent_type": "trading",
+            "agent_name": agent_name,
+            "agent_type": agent_type,
             "timestamp": int(time.time() * 1000),
         }
     })
@@ -187,7 +189,7 @@ def main():
     # Step 3: execute register_agent to initialise state.
     # DEPLOYER_DID signs (it has a node-side key for mode-0 signing).
     # AGENT_DID is the identity registered in the WASM contract — must match
-    # what fexrapi sends in every future record_activity_batch call.
+    # what the executor service sends in every future record_activity_batch call.
     register_agent(DEPLOYER_DID, contract_address, AGENT_DID)
 
     print()
@@ -196,7 +198,7 @@ def main():
     print(f"  Deployer DID     : {DEPLOYER_DID}")
     print(f"  Agent DID        : {AGENT_DID}")
     print()
-    print("Add to fexrapi + unit1440 .env on VM2:")
+    print("Add to your executor service + agent service .env on VM2:")
     print(f"  AGENT_STAKING_CONTRACT_ADDRESS={contract_address}")
     print(f"  AGENT_STAKING_EXECUTOR_DID={AGENT_DID}")
     print(f"  RUBIX_CONTRACT_ADDRESS={contract_address}")
